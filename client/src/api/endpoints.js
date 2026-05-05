@@ -23,9 +23,16 @@ export const usersApi = {
 
 export const conversationsApi = {
   list: () => apiFetch('/conversations'),
-  history: (userId, before) => {
+  history: async (userId, before) => {
     const qs = before ? `?before=${encodeURIComponent(before)}` : '';
-    return apiFetch(`/conversations/${userId}/messages${qs}`);
+    try {
+      return await apiFetch(`/conversations/${userId}/messages${qs}`);
+    } catch (err) {
+      // Brand-new conversations (no messages exchanged yet) come back as
+      // 404 "User not found" from the API. Treat that as an empty history.
+      if (err.status === 404) return [];
+      throw err;
+    }
   },
 };
 

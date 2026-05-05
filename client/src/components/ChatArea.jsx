@@ -1,14 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { FiSend, FiLock, FiAlertTriangle, FiCheck, FiArrowLeft } from 'react-icons/fi';
-import Avatar from './Avatar';
-import { useAuth } from '../context/AuthContext';
-import { conversationsApi, usersApi, messagesApi } from '../api/endpoints';
-import { encryptMessage, decryptMessage } from '../crypto/messages';
-import { importPublicKey } from '../crypto/keys';
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  FiSend,
+  FiLock,
+  FiAlertTriangle,
+  FiCheck,
+  FiArrowLeft,
+} from "react-icons/fi";
+import Avatar from "./Avatar";
+import { useAuth } from "../context/AuthContext";
+import { conversationsApi, usersApi, messagesApi } from "../api/endpoints";
+import { encryptMessage, decryptMessage } from "../crypto/messages";
+import { importPublicKey } from "../crypto/keys";
 
 function formatTime(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function ChatArea({
@@ -21,7 +30,7 @@ export default function ChatArea({
   const { user, privateKey, publicKey } = useAuth();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [text, setText] = useState('');
+  const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [recipientKey, setRecipientKey] = useState(null);
   const [keyError, setKeyError] = useState(null);
@@ -37,20 +46,37 @@ export default function ChatArea({
     setKeyError(null);
 
     (async () => {
+      // Fetch the recipient's public key first — without it we cannot
+      // encrypt, and there's no point loading history we can't show. We
+      // run history in parallel and tolerate it failing independently.
+      const historyPromise = conversationsApi
+        .history(conversation.user_id)
+        .catch(() => []);
       try {
-        const [history, pk] = await Promise.all([
-          conversationsApi.history(conversation.user_id),
-          usersApi.getPublicKey(conversation.user_id),
-        ]);
+        const pk = await usersApi.getPublicKey(conversation.user_id);
         if (cancelled) return;
         const recipientPub = await importPublicKey(pk.public_key);
         if (cancelled) return;
         setRecipientKey(recipientPub);
+      } catch (e) {
+        if (!cancelled) {
+          setKeyError(
+            e.status === 404
+              ? "This account no longer exists on the server."
+              : e.message || "Could not load this user's public key."
+          );
+          setLoading(false);
+        }
+        return;
+      }
+      try {
+        const history = await historyPromise;
+        if (cancelled) return;
         const decrypted = await decryptList(history || [], privateKey, user.id);
         if (cancelled) return;
         setMessages(decrypted.reverse());
       } catch (e) {
-        if (!cancelled) setKeyError(e.message || 'Failed to load conversation');
+        console.warn("History load failed:", e);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -63,12 +89,21 @@ export default function ChatArea({
 
   useEffect(() => {
     if (!incomingFrame) return;
-    if (incomingFrame.type !== 'message.receive' && incomingFrame.type !== 'message.sent') return;
-    const msg = incomingFrame.message;
-    if (!msg) return;
+    // Server frames use { event, ...flat fields } — not { type, message: {...} }.
+    if (incomingFrame.event !== "message.receive") return;
+    const msg = {
+      id: incomingFrame.id,
+      from_user_id: incomingFrame.from_user_id,
+      to_user_id: incomingFrame.to_user_id,
+      payload: incomingFrame.payload,
+      created_at: incomingFrame.created_at,
+      delivered: true,
+    };
+    if (!msg.id || !msg.payload) return;
     if (!conversation) return;
     const involvesActive =
-      (msg.from_user_id === conversation.user_id && msg.to_user_id === user.id) ||
+      (msg.from_user_id === conversation.user_id &&
+        msg.to_user_id === user.id) ||
       (msg.from_user_id === user.id && msg.to_user_id === conversation.user_id);
     if (!involvesActive) return;
     (async () => {
@@ -82,7 +117,11 @@ export default function ChatArea({
       } catch (e) {
         setMessages((prev) => [
           ...prev,
-          { ...msg, plaintext: null, decryptError: e.message || 'Decryption failed' },
+          {
+            ...msg,
+            plaintext: null,
+            decryptError: e.message || "Decryption failed",
+          },
         ]);
       }
     })();
@@ -94,10 +133,47 @@ export default function ChatArea({
     }
   }, [messages]);
 
+  // The server doesn't push REST-sent messages to an already-connected
+  // recipient over WebSocket — they only arrive on the next reconnect's
+  // flush. To get a live-feeling experience we poll the conversation
+  // history every few seconds while it's open and merge in any new ids.
+  useEffect(() => {
+    if (!conversation || !privateKey || !recipientKey) return;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const list = await conversationsApi.history(conversation.user_id);
+        if (cancelled || !Array.isArray(list)) return;
+        const decrypted = await decryptList(list, privateKey, user.id);
+        if (cancelled) return;
+        setMessages((prev) => {
+          const known = new Set(prev.map((m) => m.id));
+          // Drop any optimistic messages whose plaintext matches a fresh
+          // server message we just learned about (by from/to + plaintext +
+          // close timestamp). The optimistic message will be replaced by
+          // the server-issued record below.
+          const newOnes = decrypted
+            .filter((m) => !known.has(m.id))
+            .map((m) => ({ ...m, delivered: m.delivered ?? true }));
+          if (!newOnes.length) return prev;
+          const merged = [...prev, ...newOnes].sort(
+            (a, b) => new Date(a.created_at) - new Date(b.created_at)
+          );
+          return merged;
+        });
+      } catch {}
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [conversation, privateKey, recipientKey, user?.id]);
+
   useEffect(() => {
     if (taRef.current) {
-      taRef.current.style.height = 'auto';
-      taRef.current.style.height = Math.min(taRef.current.scrollHeight, 160) + 'px';
+      taRef.current.style.height = "auto";
+      taRef.current.style.height =
+        Math.min(taRef.current.scrollHeight, 160) + "px";
     }
   }, [text]);
 
@@ -116,26 +192,39 @@ export default function ChatArea({
       pending: true,
     };
     setMessages((prev) => [...prev, optimistic]);
-    setText('');
+    setText("");
     try {
       const payload = await encryptMessage(value, recipientKey, publicKey);
-      const sentViaWs = socket?.send({
-        type: 'message.send',
-        to: conversation.user_id,
-        payload,
-      });
-      if (!sentViaWs) {
-        const created = await messagesApi.send(conversation.user_id, payload);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId ? { ...m, id: created.id, delivered: created.delivered, pending: false, created_at: created.created_at } : m
-          )
-        );
-      }
+      // Always use REST for sends. The WS API doesn't echo a sent-confirmation
+      // frame back to the sender, which made WS-sent messages stay in their
+      // optimistic "pending" state forever. REST gives us the persisted record
+      // synchronously so we can swap the temp message for the real one.
+      const created = await messagesApi.send(conversation.user_id, payload);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempId
+            ? {
+                ...m,
+                id: created.id,
+                delivered: created.delivered,
+                pending: false,
+                created_at: created.created_at,
+              }
+            : m
+        )
+      );
       onMessageSent?.();
     } catch (e) {
+      const friendly =
+        e.status === 404
+          ? "Recipient no longer exists on the server."
+          : e.message || "Send failed";
       setMessages((prev) =>
-        prev.map((m) => (m.id === tempId ? { ...m, failed: true, pending: false, error: e.message } : m))
+        prev.map((m) =>
+          m.id === tempId
+            ? { ...m, failed: true, pending: false, error: friendly }
+            : m
+        )
       );
     } finally {
       setSending(false);
@@ -143,7 +232,7 @@ export default function ChatArea({
   }
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -156,8 +245,9 @@ export default function ChatArea({
           <FiLock size={48} color="var(--wb-accent)" />
           <h2>Your messages are encrypted</h2>
           <p>
-            Pick a conversation, or search a username on the left to start a new one.
-            Plaintext never leaves this device — the server only sees ciphertext.
+            Pick a conversation, or search a username on the left to start a new
+            one. Plaintext never leaves this device — the server only sees
+            ciphertext.
           </p>
         </div>
       </main>
@@ -167,7 +257,12 @@ export default function ChatArea({
   return (
     <main className="chat-area">
       <header className="chat-header">
-        <button className="icon-btn" onClick={onBack} style={{ display: 'none' }} aria-label="Back">
+        <button
+          className="icon-btn"
+          onClick={onBack}
+          style={{ display: "none" }}
+          aria-label="Back"
+        >
           <FiArrowLeft />
         </button>
         <Avatar name={conversation.display_name || conversation.username} />
@@ -177,7 +272,7 @@ export default function ChatArea({
             @{conversation.username}
             <span className="encrypted-pill">
               <FiLock size={10} />
-              E2EE
+              {/* E2EE */}
             </span>
           </div>
         </div>
@@ -193,12 +288,17 @@ export default function ChatArea({
         {!keyError && (
           <div className="encryption-banner">
             <FiLock />
-            Messages are end-to-end encrypted. Not even WhisperBox can read them.
+            {/* Messages are end-to-end encrypted. Not even WhisperBox can read them. */}
+            Messages are end-to-end encrypted.
           </div>
         )}
-        {loading && <div className="empty-list">Decrypting history…</div>}
+        {/* {loading && <div className="empty-list">Decrypting history…</div>} */}
+        {loading && <div className="empty-list">loading history...</div>}
+
         {!loading && messages.length === 0 && !keyError && (
-          <div className="empty-list">Say hi! Your first message will be encrypted.</div>
+          <div className="empty-list">
+            Say hi! Your first message will be encrypted.
+          </div>
         )}
         {messages.map((m) => (
           <MessageBubble key={m.id} m={m} isOwn={m.from_user_id === user.id} />
@@ -230,10 +330,12 @@ export default function ChatArea({
 
 function MessageBubble({ m, isOwn }) {
   return (
-    <div className={`bubble-row ${isOwn ? 'out' : 'in'}`}>
-      <div className={`bubble ${isOwn ? 'out' : 'in'} ${m.failed ? 'failed' : ''}`}>
+    <div className={`bubble-row ${isOwn ? "out" : "in"}`}>
+      <div
+        className={`bubble ${isOwn ? "out" : "in"} ${m.failed ? "failed" : ""}`}
+      >
         {m.decryptError ? (
-          <span style={{ fontStyle: 'italic', color: 'var(--wb-text-muted)' }}>
+          <span style={{ fontStyle: "italic", color: "var(--wb-text-muted)" }}>
             <FiAlertTriangle /> Could not decrypt this message
           </span>
         ) : (
@@ -242,10 +344,21 @@ function MessageBubble({ m, isOwn }) {
         <div className="bubble-meta">
           {formatTime(m.created_at)}
           {isOwn && !m.failed && (
-            <FiCheck color={m.delivered ? 'var(--wb-accent)' : 'var(--wb-text-muted)'} size={14} />
+            <FiCheck
+              color={m.delivered ? "var(--wb-accent)" : "var(--wb-text-muted)"}
+              size={14}
+            />
           )}
-          {m.failed && <FiAlertTriangle color="var(--wb-danger)" size={12} title={m.error} />}
-          {m.pending && <span className="spinner" style={{ width: 10, height: 10 }} />}
+          {m.failed && (
+            <FiAlertTriangle
+              color="var(--wb-danger)"
+              size={12}
+              title={m.error}
+            />
+          )}
+          {m.pending && (
+            <span className="spinner" style={{ width: 10, height: 10 }} />
+          )}
         </div>
       </div>
     </div>
@@ -260,7 +373,11 @@ async function decryptList(list, privateKey, selfId) {
       const plaintext = await decryptMessage(m.payload, privateKey, isOwn);
       out.push({ ...m, plaintext });
     } catch (e) {
-      out.push({ ...m, plaintext: null, decryptError: e.message || 'Decryption failed' });
+      out.push({
+        ...m,
+        plaintext: null,
+        decryptError: e.message || "Decryption failed",
+      });
     }
   }
   return out;

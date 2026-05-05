@@ -25,6 +25,8 @@ export default function ChatPage() {
   useEffect(() => {
     if (!isAuthenticated) return;
     refreshConversations();
+    const interval = setInterval(refreshConversations, 5000);
+    return () => clearInterval(interval);
   }, [isAuthenticated, refreshConversations]);
 
   useEffect(() => {

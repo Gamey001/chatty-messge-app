@@ -68,7 +68,9 @@ export async function apiFetch(path, options = {}, retried = false) {
         detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
       }
     } catch {}
-    throw new Error(detail);
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
   }
   if (res.status === 204) return null;
   return res.json();
