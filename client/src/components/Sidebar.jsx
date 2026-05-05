@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import { FiSearch, FiLogOut, FiEdit, FiLock } from 'react-icons/fi';
-import Avatar from './Avatar';
-import { useAuth } from '../context/AuthContext';
-import { conversationsApi, usersApi } from '../api/endpoints';
+import { useEffect, useMemo, useState } from "react";
+import { FiSearch, FiLogOut, FiEdit, FiLock } from "react-icons/fi";
+import Avatar from "./Avatar";
+import { useAuth } from "../context/AuthContext";
+import { conversationsApi, usersApi } from "../api/endpoints";
 
 function formatTime(iso) {
-  if (!iso) return '';
+  if (!iso) return "";
   const d = new Date(iso);
   const now = new Date();
   const sameDay =
@@ -13,11 +13,11 @@ function formatTime(iso) {
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate();
   if (sameDay) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
   const diffDays = Math.floor((now - d) / 86_400_000);
   if (diffDays < 7) {
-    return d.toLocaleDateString([], { weekday: 'short' });
+    return d.toLocaleDateString([], { weekday: "short" });
   }
   return d.toLocaleDateString();
 }
@@ -30,7 +30,7 @@ export default function Sidebar({
   connection,
 }) {
   const { user, logout } = useAuth();
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);
 
@@ -70,7 +70,7 @@ export default function Sidebar({
       display_name: u.display_name,
       last_message_at: null,
     });
-    setQuery('');
+    setQuery("");
     setSearchResults(null);
     refreshConversations();
   }
@@ -81,12 +81,24 @@ export default function Sidebar({
         <div className="me">
           <Avatar name={user?.display_name || user?.username} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 500, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div
+              style={{
+                fontWeight: 500,
+                fontSize: 14,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
               {user?.display_name}
             </div>
             <div className={`connection-status ${connection}`}>
               <span className="dot" />
-              {connection === 'online' ? 'Realtime connected' : connection === 'connecting' ? 'Connecting…' : 'Offline (REST fallback)'}
+              {connection === "online"
+                ? "Realtime connected"
+                : connection === "connecting"
+                ? "Connecting…"
+                : "Offline (REST fallback)"}
             </div>
           </div>
         </div>
@@ -100,7 +112,7 @@ export default function Sidebar({
           <FiSearch className="search-icon" size={16} />
           <input
             className="search-input"
-            placeholder="Search users to start a chat"
+            placeholder="Search users to start a chat (type 'demo' for test)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -117,7 +129,11 @@ export default function Sidebar({
             {searchResults
               .filter((u) => u.id !== user?.id)
               .map((u) => (
-                <div key={u.id} className="user-search-result" onClick={() => pickSearchUser(u)}>
+                <div
+                  key={u.id}
+                  className="user-search-result"
+                  onClick={() => pickSearchUser(u)}
+                >
                   <Avatar name={u.display_name || u.username} />
                   <div className="conv-meta">
                     <div className="conv-name">{u.display_name}</div>
@@ -133,13 +149,17 @@ export default function Sidebar({
               <div className="empty-list">
                 <FiLock style={{ marginBottom: 8 }} />
                 <div>No conversations yet.</div>
-                <div style={{ marginTop: 4, fontSize: 12 }}>Search a username above to start one.</div>
+                <div style={{ marginTop: 4, fontSize: 12 }}>
+                  Search a username above to start one.
+                </div>
               </div>
             )}
             {filteredConvs.map((c) => (
               <div
                 key={c.user_id}
-                className={`conv-item ${selectedUserId === c.user_id ? 'active' : ''}`}
+                className={`conv-item ${
+                  selectedUserId === c.user_id ? "active" : ""
+                }`}
                 onClick={() => onSelect(c)}
               >
                 <Avatar name={c.display_name || c.username} />
@@ -150,7 +170,7 @@ export default function Sidebar({
                     Encrypted · @{c.username}
                   </div>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--wb-text-muted)' }}>
+                <div style={{ fontSize: 11, color: "var(--wb-text-muted)" }}>
                   {formatTime(c.last_message_at)}
                 </div>
               </div>
