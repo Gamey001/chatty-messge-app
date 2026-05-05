@@ -148,18 +148,27 @@ export default function ChatArea({
         if (cancelled) return;
         setMessages((prev) => {
           const known = new Set(prev.map((m) => m.id));
-          // Drop any optimistic messages whose plaintext matches a fresh
-          // server message we just learned about (by from/to + plaintext +
-          // close timestamp). The optimistic message will be replaced by
-          // the server-issued record below.
           const newOnes = decrypted
             .filter((m) => !known.has(m.id))
             .map((m) => ({ ...m, delivered: m.delivered ?? true }));
           if (!newOnes.length) return prev;
-          const merged = [...prev, ...newOnes].sort(
+          // If a polled message matches an optimistic temp entry by plaintext
+          // + sender + tight timestamp, swallow the temp so the user sees
+          // exactly one bubble.
+          const filtered = prev.filter((m) => {
+            if (!m.pending) return true;
+            return !newOnes.some(
+              (n) =>
+                n.from_user_id === m.from_user_id &&
+                n.to_user_id === m.to_user_id &&
+                n.plaintext === m.plaintext &&
+                Math.abs(new Date(n.created_at) - new Date(m.created_at)) <
+                  10_000
+            );
+          });
+          return [...filtered, ...newOnes].sort(
             (a, b) => new Date(a.created_at) - new Date(b.created_at)
           );
-          return merged;
         });
       } catch {}
     }, 3000);
@@ -200,8 +209,14 @@ export default function ChatArea({
       // optimistic "pending" state forever. REST gives us the persisted record
       // synchronously so we can swap the temp message for the real one.
       const created = await messagesApi.send(conversation.user_id, payload);
-      setMessages((prev) =>
-        prev.map((m) =>
+      setMessages((prev) => {
+        // If the poll already merged the server-issued message into the list
+        // while the REST call was in flight, drop the optimistic temp entry
+        // instead of leaving a duplicate.
+        if (prev.some((m) => m.id === created.id)) {
+          return prev.filter((m) => m.id !== tempId);
+        }
+        return prev.map((m) =>
           m.id === tempId
             ? {
                 ...m,
@@ -211,8 +226,8 @@ export default function ChatArea({
                 created_at: created.created_at,
               }
             : m
-        )
-      );
+        );
+      });
       onMessageSent?.();
     } catch (e) {
       const friendly =
