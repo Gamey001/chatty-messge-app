@@ -1,0 +1,17 @@
+# Netlify config for the WhisperBox SPA.
+# The React app lives in ./client; the production bundle is emitted to
+# client/dist by `vite build`. We also rewrite every unknown path to
+# index.html so client-side navigation and full-page refreshes both work.
+
+[build]
+  base = "client"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22.12.0"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
