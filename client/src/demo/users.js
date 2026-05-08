@@ -7,15 +7,15 @@
 
 export const DEMO_USERS = [
   {
-    username: 'demo_alice',
-    display_name: 'Alice (demo)',
-    password: 'whisperbox-demo-2026!',
-    color: '#00a884',
+    username: "demo_alice",
+    display_name: "Alice (demo)",
+    password: "whisperbox-demo-2026!",
+    color: "#00a884",
   },
   {
-    username: 'demo_bob',
-    display_name: 'Bob (demo)',
-    password: 'whisperbox-demo-2026!',
-    color: '#06cf9c',
+    username: "demo_bob",
+    display_name: "Bob (demo)",
+    password: "whisperbox-demo-2026!",
+    color: "#06cf9c",
   },
 ];
