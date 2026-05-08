@@ -58,7 +58,7 @@ export default function AuthPage() {
       <form className="auth-card" onSubmit={handleSubmit}>
         <div className="auth-brand">
           <FiShield />
-          <span>WhisperBox</span>
+          <span>Chatty</span>
         </div>
         <h1>{mode === "login" ? "Welcome back" : "Create your account"}</h1>
         {/* <p className="subtitle">
@@ -134,7 +134,7 @@ export default function AuthPage() {
         <div className="auth-switch">
           {mode === "login" ? (
             <>
-              New to WhisperBox?{" "}
+              New to Chatty?{" "}
               <a
                 href="#"
                 onClick={(e) => {
