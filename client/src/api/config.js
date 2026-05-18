@@ -1,2 +1,2 @@
-export const API_BASE = 'https://whisperbox.koyeb.app';
-export const WS_BASE = 'wss://whisperbox.koyeb.app';
+export const API_BASE = 'http://localhost:8000';
+export const WS_BASE = 'ws://localhost:8000';
