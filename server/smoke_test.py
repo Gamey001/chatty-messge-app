@@ -39,6 +39,11 @@ def blob(prefix: str) -> str:
 
 def main() -> None:
     print(f"smoke test against {API}")
+    suffix = os.urandom(4).hex()
+    ALICE = f"alice_smoke_{suffix}"
+    BOB = f"bob_smoke_{suffix}"
+    globals()["ALICE"] = ALICE
+    globals()["BOB"] = BOB
 
     # 1. Health
     h = req("GET", "/health")
@@ -48,14 +53,14 @@ def main() -> None:
     # 2. Register Alice
     alice_pw = "alice-password-12345"
     alice = req("POST", "/auth/register", body={
-        "username": "alice_smoke",
+        "username": ALICE,
         "display_name": "Alice Smoke",
         "password": alice_pw,
         "public_key": blob("alice-pub"),
         "wrapped_private_key": blob("alice-wpk"),
         "pbkdf2_salt": blob("alice-salt"),
     })
-    assert alice["user"]["username"] == "alice_smoke"
+    assert alice["user"]["username"] == ALICE
     assert alice["user"]["wrapped_private_key"].startswith("alice-wpk")
     assert alice["user"]["pbkdf2_salt"].startswith("alice-salt")
     assert alice["access_token"] and alice["refresh_token"]
@@ -67,7 +72,7 @@ def main() -> None:
     # 3. Duplicate register fails 409
     try:
         req("POST", "/auth/register", body={
-            "username": "alice_smoke", "display_name": "x", "password": alice_pw,
+            "username": ALICE, "display_name": "x", "password": alice_pw,
             "public_key": "x", "wrapped_private_key": "x", "pbkdf2_salt": "x",
         })
         raise SystemExit("duplicate register should have failed")
@@ -78,7 +83,7 @@ def main() -> None:
     # 4. Register Bob
     bob_pw = "bob-password-12345"
     bob = req("POST", "/auth/register", body={
-        "username": "bob_smoke",
+        "username": BOB,
         "display_name": "Bob Smoke",
         "password": bob_pw,
         "public_key": blob("bob-pub"),
@@ -90,14 +95,14 @@ def main() -> None:
     ok(f"register bob -> id={bob_id[:8]}…")
 
     # 5. Login as Alice
-    login = req("POST", "/auth/login", body={"username": "alice_smoke", "password": alice_pw})
+    login = req("POST", "/auth/login", body={"username": ALICE, "password": alice_pw})
     assert login["user"]["id"] == alice_id
     assert login["user"]["wrapped_private_key"] == alice["user"]["wrapped_private_key"]
     ok("login returns same wrapped key blob")
 
     # 6. Wrong password
     try:
-        req("POST", "/auth/login", body={"username": "alice_smoke", "password": "wrong"})
+        req("POST", "/auth/login", body={"username": ALICE, "password": "wrong"})
         raise SystemExit("wrong password should have failed")
     except SystemExit as e:
         assert "401" in str(e), e
@@ -105,7 +110,7 @@ def main() -> None:
 
     # 7. /auth/me
     me = req("GET", "/auth/me", token=a_tok)
-    assert me["id"] == alice_id and me["username"] == "alice_smoke"
+    assert me["id"] == alice_id and me["username"] == ALICE
     ok("/auth/me")
 
     # 8. Refresh
